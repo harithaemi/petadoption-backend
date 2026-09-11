@@ -40,9 +40,11 @@ connectDB()
   .then(() => {
     console.log("Database connected");
 
-   server.listen(7777, () => {
-      console.log("server running on 7777");
-    });
+ const PORT = process.env.PORT || 7777;
+
+server.listen(PORT, () => {
+  console.log(`server running on ${PORT}`);
+});
   })
   .catch((err) => {
     console.log("Database cannot connect:", err.message);
