@@ -2,8 +2,6 @@
 const Message = require("../models/Message");
 const User = require("../models/User");
 const Pet = require("../models/Pets");
-
-
 const sendMessage = async (req, res) => {
   try {
     const { receiver, pet, message } = req.body;
@@ -15,8 +13,6 @@ const sendMessage = async (req, res) => {
         message: "Receiver, pet and message are required",
       });
     }
-
-
     const existingUser = await User.findById(receiver);
 
     if (!existingUser) {
