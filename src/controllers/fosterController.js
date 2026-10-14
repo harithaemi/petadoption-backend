@@ -1,6 +1,6 @@
 const FosterApplication = require("../models/FosterApplication");
 const Pet = require("../models/Pets");
-
+const sendEmail = require("../utils/sendEmail");
 const createFosterApplication = async (req, res) => {
   try {
     const { pet } = req.body;
@@ -67,6 +67,9 @@ const getReceivedFosterApplications = async (req, res) => {
   }
 };
 
+
+
+
 const updateFosterApplicationStatus = async (req, res) => {
   try {
     const { status } = req.body;
@@ -79,7 +82,8 @@ const updateFosterApplicationStatus = async (req, res) => {
     }
 
     const application = await FosterApplication.findById(req.params.id)
-      .populate("pet");
+      .populate("pet")
+      .populate("adopter");
 
     if (!application) {
       return res.status(404).json({
@@ -88,31 +92,101 @@ const updateFosterApplicationStatus = async (req, res) => {
       });
     }
 
-    if (application.pet.shelter.toString() !== req.user._id.toString()) {
+    if (!application.pet) {
+      return res.status(404).json({
+        success: false,
+        message: "Pet not found",
+      });
+    }
+
+    if (!application.adopter) {
+      return res.status(404).json({
+        success: false,
+        message: "Applicant not found",
+      });
+    }
+
+    if (
+      application.pet.shelter.toString() !== req.user._id.toString()
+    ) {
       return res.status(403).json({
         success: false,
-        message: "Unauthorized",
+        message: "Unauthorized to manage this application",
       });
+    }
+
+    if (
+      application.adopter._id.toString() === req.user._id.toString()
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "You cannot approve your own application",
+      });
+    }
+
+    if (application.status === "selected") {
+      return res.status(400).json({
+        success: false,
+        message: "This application has already been selected",
+      });
+    }
+
+    if (status === "selected") {
+      const updatedPet = await Pet.findOneAndUpdate(
+        {
+          _id: application.pet._id,
+          shelter: req.user._id,
+          status: "available",
+        },
+        { status: "fostered" },
+        { new: true }
+      );
+
+      if (!updatedPet) {
+        return res.status(400).json({
+          success: false,
+          message: "This pet is no longer available",
+        });
+      }
     }
 
     application.status = status;
     await application.save();
 
-    if (status === "selected") {
-      await Pet.findByIdAndUpdate(application.pet._id, {
-        status: "fostered",
-      });
-    }
+    const petName = application.pet.petName || "the pet";
 
-    res.json({
+    await sendEmail({
+      to: application.email,
+      subject: `Foster application ${status}`,
+      html: `
+        <h2>Foster Application Update</h2>
+        <p>Hello ${application.fullName},</p>
+        <p>Your foster application for <strong>${petName}</strong>
+        has been <strong>${status}</strong>.</p>
+        ${
+          status === "selected"
+            ? "<p>Please contact the shelter to coordinate the next steps.</p>"
+            : "<p>Thank you for your interest in fostering a pet.</p>"
+        }
+        <p>Thank you,<br>Pet Adoption Team</p>
+      `,
+    });
+
+    return res.status(200).json({
       success: true,
       message: `Application ${status}`,
       application,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("Update foster application error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update foster application",
+    });
   }
 };
+
 
 module.exports = {
   createFosterApplication,

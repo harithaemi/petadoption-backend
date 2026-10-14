@@ -11,6 +11,10 @@ const petSchema = new mongoose.Schema(
   type: [String],
   required: true,
 },
+videos: {
+  type: [String],
+  default: [],
+},
     gender: {
       type: String,
       enum: ["Male", "Female"],

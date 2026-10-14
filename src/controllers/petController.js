@@ -1,41 +1,59 @@
 const Pet = require("../models/Pets");
 const cloudinary = require("../config/cloudinary");
 
-const uploadImage = (buffer) => {
+
+const uploadFile = (file) => {
   return new Promise((resolve, reject) => {
+    const isVideo = file.mimetype.startsWith("video/");
+
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder: "pet-adoption/pets",
-        resource_type: "image",
+        resource_type: isVideo ? "video" : "image",
       },
       (error, result) => {
-        if (error) reject(error);
-        else resolve(result);
+        if (error) {
+          reject(error);
+        } else {
+          resolve({
+            url: result.secure_url,
+            type: isVideo ? "video" : "image",
+          });
+        }
       }
     );
 
-    uploadStream.end(buffer);
+    uploadStream.end(file.buffer);
   });
 };
 
+
+
 const createPet = async (req, res) => {
   try {
-    if (!req.files || req.files.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Pet images are required",
-      });
-    }
+    
+if (!req.files || req.files.length === 0) {
+  return res.status(400).json({
+    success: false,
+    message: "Please upload at least one image or video",
+  });
+}
 
-    const uploadedImages = await Promise.all(
-      req.files.map((file) => uploadImage(file.buffer))
-    );
+const uploadedFiles = await Promise.all(
+  req.files.map((file) => uploadFile(file))
+);
 
-    const pet = await Pet.create({
-      ...req.body,
-      images: uploadedImages.map((image) => image.secure_url),
-      shelter: req.user._id,
-    });
+const pet = await Pet.create({
+  ...req.body,
+  images: uploadedFiles
+    .filter((file) => file.type === "image")
+    .map((file) => file.url),
+  videos: uploadedFiles
+    .filter((file) => file.type === "video")
+    .map((file) => file.url),
+  shelter: req.user._id,
+});
+
 
     res.status(201).json({
       success: true,
@@ -146,11 +164,17 @@ const updatePet = async (req, res) => {
     if (req.body.status !== undefined) pet.status = req.body.status;
 
     if (req.files && req.files.length > 0) {
-      const uploadedImages = await Promise.all(
-        req.files.map((file) => uploadImage(file.buffer))
+      const uploadedFiles = await Promise.all(
+        req.files.map((file) => uploadFile(file))
       );
 
-      pet.images = uploadedImages.map((image) => image.secure_url);
+      pet.images = uploadedFiles
+        .filter((file) => file.type === "image")
+        .map((file) => file.url);
+
+      pet.videos = uploadedFiles
+        .filter((file) => file.type === "video")
+        .map((file) => file.url);
     }
 
     await pet.save();

@@ -1,28 +1,38 @@
+
 const multer = require("multer");
 const path = require("path");
 
 const storage = multer.memoryStorage();
 
-const upload = multer({
-  storage: storage,
+const allowedTypes = {
+  ".jpg": ["image/jpeg"],
+  ".jpeg": ["image/jpeg"],
+  ".jfif": ["image/jpeg"],
+  ".png": ["image/png"],
+  ".webp": ["image/webp"],
+  ".mp4": ["video/mp4"],
+  ".webm": ["video/webm"],
+  ".mov": ["video/quicktime"],
+};
 
+const upload = multer({
+  storage,
   limits: {
-    fileSize: 5 * 1024 * 1024,
+    fileSize: 50 * 1024 * 1024,
+    files: 5,
   },
 
   fileFilter: (req, file, cb) => {
-    const allowedExtensions = [".jpg", ".jpeg", ".png", ".jfif", ".webp"];
-
     const extension = path.extname(file.originalname).toLowerCase();
+    const expectedTypes = allowedTypes[extension];
 
-    if (
-      file.mimetype.startsWith("image/") ||
-      allowedExtensions.includes(extension)
-    ) {
-      cb(null, true);
-    } else {
-      cb(new Error("Only image files are allowed"));
+    if (!expectedTypes || !expectedTypes.includes(file.mimetype)) {
+      return cb(
+        new Error("Only supported image and video files are allowed")
+      );
     }
+
+    cb(null, true);
   },
 });
 
