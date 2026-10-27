@@ -78,10 +78,14 @@ const createAdoptionApplication = async (req, res) => {
 
         if (!emailResult.success) {
           console.error("Shelter email failed:", emailResult.error);
+        } else {
+          console.log("Shelter notification email sent successfully");
         }
       } catch (emailError) {
         console.error("Shelter email error:", emailError.message);
       }
+    } else {
+      console.error("Shelter email address not found");
     }
 
     return res.status(201).json({
@@ -236,14 +240,20 @@ const updateAdoptionApplicationStatus = async (req, res) => {
 
     const petName = application.pet.petName || "the pet";
 
-    if (application.adopter.emailId) {
+    const adopterEmail =
+      application.adopter.emailId || application.email;
+
+    console.log("Adoption application status updated:", status);
+    console.log("Adopter notification email:", adopterEmail || "Not found");
+
+    if (adopterEmail) {
       try {
         const emailResult = await sendEmail({
-          to: application.adopter.emailId,
+          to: adopterEmail,
           subject: `Adoption application ${status}`,
           html: `
             <h2>Adoption Application Update</h2>
-            <p>Hello ${application.adopter.userName},</p>
+            <p>Hello ${application.adopter.userName || application.fullName},</p>
             <p>Your adoption application for
             <strong>${petName}</strong> has been
             <strong>${status}</strong>.</p>
@@ -258,10 +268,14 @@ const updateAdoptionApplicationStatus = async (req, res) => {
 
         if (!emailResult.success) {
           console.error("Adopter email failed:", emailResult.error);
+        } else {
+          console.log("Adopter notification email sent successfully");
         }
       } catch (emailError) {
         console.error("Adopter email error:", emailError.message);
       }
+    } else {
+      console.error("Adopter email address not found");
     }
 
     return res.status(200).json({
