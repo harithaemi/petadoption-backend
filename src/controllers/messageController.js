@@ -1,18 +1,38 @@
 
+const mongoose = require("mongoose");
+const sendEmail = require("../utils/sendEmail");
 const Message = require("../models/Message");
 const User = require("../models/User");
 const Pet = require("../models/Pets");
+
 const sendMessage = async (req, res) => {
   try {
     const { receiver, pet, message } = req.body;
 
-
-    if (!receiver || !pet || !message) {
+    if (!receiver || !pet || typeof message !== "string" || !message.trim()) {
       return res.status(400).json({
         success: false,
         message: "Receiver, pet and message are required",
       });
     }
+
+    if (
+      !mongoose.isValidObjectId(receiver) ||
+      !mongoose.isValidObjectId(pet)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid receiver or pet ID",
+      });
+    }
+
+    if (receiver.toString() === req.user._id.toString()) {
+      return res.status(400).json({
+        success: false,
+        message: "You cannot send messages to yourself",
+      });
+    }
+
     const existingUser = await User.findById(receiver);
 
     if (!existingUser) {
@@ -22,7 +42,6 @@ const sendMessage = async (req, res) => {
       });
     }
 
- 
     const existingPet = await Pet.findById(pet);
 
     if (!existingPet) {
@@ -32,7 +51,6 @@ const sendMessage = async (req, res) => {
       });
     }
 
-  
     const newMessage = await Message.create({
       sender: req.user._id,
       receiver,
@@ -40,11 +58,32 @@ const sendMessage = async (req, res) => {
       message: message.trim(),
     });
 
-
     const populatedMessage = await Message.findById(newMessage._id)
       .populate("sender", "userName emailId")
       .populate("receiver", "userName emailId")
       .populate("pet", "petName image");
+
+    if (existingUser.emailId) {
+      try {
+        const emailResult = await sendEmail({
+          to: existingUser.emailId,
+          subject: `New message about ${existingPet.petName}`,
+          html: `
+            <h2>You have a new message!</h2>
+            <p>Hello, ${existingUser.userName}</p>
+            <p><strong>${populatedMessage.sender.userName}</strong> sent you a new message regarding <strong>${existingPet.petName}</strong>.</p>
+            <p>Log in to your Pet Adoption account to view and reply to the message.</p>
+            <p>Thank you,<br>Pet Adoption Team</p>
+          `,
+        });
+
+        if (emailResult && !emailResult.success) {
+          console.error("Email notification failed:", emailResult.error);
+        }
+      } catch (emailError) {
+        console.error("Email notification error:", emailError.message);
+      }
+    }
 
     res.status(201).json({
       success: true,
@@ -56,18 +95,25 @@ const sendMessage = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: "Failed to send message",
     });
   }
 };
-
-
 
 const getMessages = async (req, res) => {
   try {
     const { petId, userId } = req.params;
 
-  
+    if (
+      !mongoose.isValidObjectId(petId) ||
+      !mongoose.isValidObjectId(userId)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid pet or user ID",
+      });
+    }
+
     const existingPet = await Pet.findById(petId);
 
     if (!existingPet) {
@@ -86,10 +132,8 @@ const getMessages = async (req, res) => {
       });
     }
 
-
     const messages = await Message.find({
       pet: petId,
-
       $or: [
         {
           sender: req.user._id,
@@ -116,18 +160,15 @@ const getMessages = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: "Failed to fetch messages",
     });
   }
 };
-
-
 
 const getConversations = async (req, res) => {
   try {
     const currentUserId = req.user._id;
 
-    
     const messages = await Message.find({
       $or: [
         { sender: currentUserId },
@@ -143,19 +184,19 @@ const getConversations = async (req, res) => {
     const conversationMap = new Map();
 
     messages.forEach((message) => {
+      if (!message.sender || !message.receiver || !message.pet) {
+        return;
+      }
+
       const senderId = message.sender._id.toString();
-      const receiverId = message.receiver._id.toString();
       const petId = message.pet._id.toString();
 
- 
       const otherUser =
         senderId === currentUserId.toString()
           ? message.receiver
           : message.sender;
 
-    
       const conversationKey = `${otherUser._id}_${petId}`;
-
 
       if (!conversationMap.has(conversationKey)) {
         conversationMap.set(conversationKey, {
@@ -181,15 +222,13 @@ const getConversations = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: "Failed to fetch conversations",
     });
   }
 };
-
 
 module.exports = {
   sendMessage,
   getMessages,
   getConversations,
 };
-
