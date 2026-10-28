@@ -1,39 +1,105 @@
+
+const mongoose = require("mongoose");
 const FosterApplication = require("../models/FosterApplication");
 const Pet = require("../models/Pets");
+const User = require("../models/User");
 const sendEmail = require("../utils/sendEmail");
+
 const createFosterApplication = async (req, res) => {
   try {
     const { pet } = req.body;
 
-    if (!(await Pet.findById(pet))) {
-      return res.status(404).json({ success: false, message: "Pet not found" });
+    if (!mongoose.isValidObjectId(pet)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid pet ID",
+      });
+    }
+
+    const existingPet = await Pet.findById(pet);
+
+    if (!existingPet) {
+      return res.status(404).json({
+        success: false,
+        message: "Pet not found",
+      });
+    }
+
+    if (existingPet.status !== "available") {
+      return res.status(400).json({
+        success: false,
+        message: "This pet is no longer available for fostering",
+      });
+    }
+
+    if (existingPet.shelter.toString() === req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "You cannot apply to foster your own pet",
+      });
     }
 
     const existing = await FosterApplication.findOne({
       pet,
       adopter: req.user._id,
-      status: "pending",
     });
 
     if (existing) {
       return res.status(400).json({
         success: false,
-        message: "You already applied for this pet",
+        message: "You have already applied to foster this pet",
       });
     }
 
     const application = await FosterApplication.create({
       ...req.body,
+      pet,
       adopter: req.user._id,
+      status: "pending",
     });
 
-    res.status(201).json({
+    const shelter = await User.findById(existingPet.shelter);
+
+    if (shelter?.emailId) {
+      try {
+        const emailResult = await sendEmail({
+          to: shelter.emailId,
+          subject: `New foster application for ${existingPet.petName}`,
+          html: `
+            <h2>New Foster Application</h2>
+            <p>Hello ${shelter.userName},</p>
+            <p>You have received a new foster application for
+            <strong>${existingPet.petName}</strong>.</p>
+            <p><strong>Applicant:</strong> ${application.fullName}</p>
+            <p>Log in to your Pet Adoption account to review the application.</p>
+            <p>Thank you,<br>Pet Adoption Team</p>
+          `,
+        });
+
+        if (!emailResult.success) {
+          console.error("Shelter foster email failed:", emailResult.error);
+        } else {
+          console.log("Shelter foster notification email sent successfully");
+        }
+      } catch (emailError) {
+        console.error("Shelter foster email error:", emailError.message);
+      }
+    } else {
+      console.error("Shelter email address not found");
+    }
+
+    return res.status(201).json({
       success: true,
       message: "Foster application submitted",
       application,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("Create foster application error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to submit foster application",
+    });
   }
 };
 
@@ -41,11 +107,21 @@ const getMyFosterApplications = async (req, res) => {
   try {
     const applications = await FosterApplication.find({
       adopter: req.user._id,
-    }).populate("pet").sort({ createdAt: -1 });
+    })
+      .populate("pet")
+      .sort({ createdAt: -1 });
 
-    res.json({ success: true, applications });
+    return res.status(200).json({
+      success: true,
+      applications,
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("Get my foster applications error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch foster applications",
+    });
   }
 };
 
@@ -58,17 +134,19 @@ const getReceivedFosterApplications = async (req, res) => {
       })
       .populate("adopter", "userName emailId");
 
-    res.json({
+    return res.status(200).json({
       success: true,
-      applications: applications.filter(app => app.pet),
+      applications: applications.filter((app) => app.pet),
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("Get received foster applications error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch received applications",
+    });
   }
 };
-
-
-
 
 const updateFosterApplicationStatus = async (req, res) => {
   try {
@@ -78,6 +156,13 @@ const updateFosterApplicationStatus = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Invalid status",
+      });
+    }
+
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid application ID",
       });
     }
 
@@ -124,10 +209,10 @@ const updateFosterApplicationStatus = async (req, res) => {
       });
     }
 
-    if (application.status === "selected") {
+    if (application.status !== "pending") {
       return res.status(400).json({
         success: false,
-        message: "This application has already been selected",
+        message: "This application has already been reviewed",
       });
     }
 
@@ -155,22 +240,43 @@ const updateFosterApplicationStatus = async (req, res) => {
 
     const petName = application.pet.petName || "the pet";
 
-    await sendEmail({
-      to: application.email,
-      subject: `Foster application ${status}`,
-      html: `
-        <h2>Foster Application Update</h2>
-        <p>Hello ${application.fullName},</p>
-        <p>Your foster application for <strong>${petName}</strong>
-        has been <strong>${status}</strong>.</p>
-        ${
-          status === "selected"
-            ? "<p>Please contact the shelter to coordinate the next steps.</p>"
-            : "<p>Thank you for your interest in fostering a pet.</p>"
+    const adopterEmail =
+      application.adopter.emailId || application.email;
+
+    console.log("Foster application status updated:", status);
+    console.log("Foster notification recipient:", adopterEmail || "Not found");
+
+    if (adopterEmail) {
+      try {
+        const emailResult = await sendEmail({
+          to: adopterEmail,
+          subject: `Foster application ${status}`,
+          html: `
+            <h2>Foster Application Update</h2>
+            <p>Hello ${application.adopter.userName || application.fullName},</p>
+            <p>Your foster application for
+            <strong>${petName}</strong> has been
+            <strong>${status}</strong>.</p>
+            ${
+              status === "selected"
+                ? "<p>Please contact the shelter to coordinate the next steps.</p>"
+                : "<p>Thank you for your interest in fostering a pet.</p>"
+            }
+            <p>Thank you,<br>Pet Adoption Team</p>
+          `,
+        });
+
+        if (!emailResult.success) {
+          console.error("Foster adopter email failed:", emailResult.error);
+        } else {
+          console.log("Foster adopter notification email sent successfully");
         }
-        <p>Thank you,<br>Pet Adoption Team</p>
-      `,
-    });
+      } catch (emailError) {
+        console.error("Foster adopter email error:", emailError.message);
+      }
+    } else {
+      console.error("Foster adopter email address not found");
+    }
 
     return res.status(200).json({
       success: true,
@@ -186,7 +292,6 @@ const updateFosterApplicationStatus = async (req, res) => {
     });
   }
 };
-
 
 module.exports = {
   createFosterApplication,

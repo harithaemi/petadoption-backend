@@ -14,7 +14,7 @@ const adoptionRoutes = require("./routes/adoptionRoutes");
 const reviewRouter = require("./routes/reviewRoutes");
 const messageRouter = require("./routes/messageRoutes");
 const initialSocket = require("./utils/socket");
-
+const meetAndGreetRoutes = require("./routes/meetAndGreetRoutes");
 app.use(express.json());
 app.use(cookieParser());
 
@@ -33,7 +33,7 @@ app.use("/", authRouter);
 app.use("/shelter", shelterRouter);
 
 app.use("/adoption", adoptionRoutes);
-
+app.use("/meet-and-greet", meetAndGreetRoutes);
 app.use("/api", uploadRouter);
 app.use("/reviews", reviewRouter);
 app.use("/messages", messageRouter);
